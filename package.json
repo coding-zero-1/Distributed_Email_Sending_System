@@ -8,7 +8,13 @@
     "dev:api": "pnpm --filter @repo/api dev",
     "dev:worker": "pnpm --filter @repo/worker dev",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "k6:smoke": "k6 run load-tests/scenarios/smoke.js",
+    "k6:load": "k6 run load-tests/scenarios/load.js",
+    "k6:stress": "k6 run load-tests/scenarios/stress.js",
+    "k6:soak": "k6 run load-tests/scenarios/soak.js",
+    "lt:check-stats": "node load-tests/scripts/check-stats.mjs",
+    "lt:monitor": "node load-tests/scripts/monitor-stats.mjs"
   },
   "keywords": [],
   "author": "",
