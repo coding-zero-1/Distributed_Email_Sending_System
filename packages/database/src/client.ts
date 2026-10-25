@@ -1,6 +1,15 @@
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "./schema/index.js";
+import { config } from "dotenv";
+import { resolve } from "node:path";
+
+if (!process.env.DATABASE_URL) {
+  config({ path: resolve(import.meta.dirname, "../../../.env") });
+  if (!process.env.DATABASE_URL) {
+    config({ path: resolve(process.cwd(), ".env") });
+  }
+}
 
 const connectionString = process.env.DATABASE_URL;
 

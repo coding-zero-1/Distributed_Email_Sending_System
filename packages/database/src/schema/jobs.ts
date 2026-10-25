@@ -30,6 +30,9 @@ export const jobs = pgTable("jobs", {
   error: text("error"),
   resultMessageId: text("result_message_id"),
 
+  idempotencyKey: varchar("idempotency_key", { length: 255 }).unique(),
+  payloadHash: varchar("payload_hash", { length: 64 }),
+
   createdAt: timestamp("created_at", {
     withTimezone: true,
   }).notNull().defaultNow(),

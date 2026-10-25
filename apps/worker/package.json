@@ -11,8 +11,11 @@
   },
   "dependencies": {
     "@repo/contracts": "workspace:*",
+    "@repo/database": "workspace:*",
     "@repo/queue": "workspace:*",
     "bullmq": "^6.3.9",
+    "dotenv": "^18.0.8",
+    "drizzle-orm": "^0.45.4",
     "nodemailer": "^10.0.10"
   },
   "devDependencies": {
