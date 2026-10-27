@@ -21,112 +21,105 @@ export async function processEmailJob(job: {
   const currentAttempt = job.attemptsMade + 1;
   const totalAttempts = job.opts.attempts ?? 1;
 
-    console.log(
-      `Processing job ${id}, attempt ${currentAttempt}/${totalAttempts}`,
-    );
+  console.log(
+    `Processing job ${id}, attempt ${currentAttempt}/${totalAttempts}`,
+  );
 
-    // Avoid resending jobs already recorded as completed.
-    const [existingJob] = await db
-      .select({ status: jobs.status })
-      .from(jobs)
-      .where(eq(jobs.id, id))
-      .limit(1);
+  // Avoid resending jobs already recorded as completed.
+  const [existingJob] = await db
+    .select({ status: jobs.status })
+    .from(jobs)
+    .where(eq(jobs.id, id))
+    .limit(1);
 
-    if (!existingJob) {
-      throw new Error(`Job ${id} does not exist in PostgreSQL`);
-    }
+  if (!existingJob) {
+    throw new Error(`Job ${id} does not exist in PostgreSQL`);
+  }
 
-    if (existingJob.status === "completed") {
-      console.log(`Job ${id} is already completed; skipping`);
-      return;
-    }
+  if (existingJob.status === "completed") {
+    console.log(`Job ${id} is already completed; skipping`);
+    return;
+  }
 
-    await db
-      .update(jobs)
-      .set({
-        status: "processing",
-        attempts: currentAttempt,
-        startedAt: new Date(),
-        error: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(jobs.id, id));
+  await db
+    .update(jobs)
+    .set({
+      status: "processing",
+      attempts: currentAttempt,
+      startedAt: new Date(),
+      error: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(jobs.id, id));
 
-    let info;
-    try {
-      info = await mailer.sendMail({
-        // GMAIL_USER may be unset when MAIL_TRANSPORT=test; fall back to a
-        // synthetic address so the JSON transport does not receive undefined.
-        from: process.env.GMAIL_USER ?? "no-reply@test.local",
-        to,
-        subject,
-        text,
-      });
-    } catch (mailError) {
-      const message =
-        mailError instanceof Error ? mailError.message : String(mailError);
+  let info;
+  try {
+    info = await mailer.sendMail({
+      from: process.env.GMAIL_USER ?? "no-reply@test.local",
+      to,
+      subject,
+      text,
+    });
+  } catch (mailError) {
+    const message =
+      mailError instanceof Error ? mailError.message : String(mailError);
 
-      const exhaustedRetries = currentAttempt >= totalAttempts;
-
-      try {
-        await db
-          .update(jobs)
-          .set({
-            status: exhaustedRetries ? "failed" : "queued",
-            attempts: currentAttempt,
-            error: message,
-            updatedAt: new Date(),
-          })
-          .where(eq(jobs.id, id));
-      } catch (databaseError) {
-        console.error(
-          `Could not update PostgreSQL state for job ${id}`,
-          databaseError,
-        );
-      }
-
-      console.error(
-        `Job ${id} failed on attempt ${currentAttempt}/${totalAttempts}: ${message}`,
-      );
-
-      // BullMQ must receive the error to trigger its retry policy.
-      throw mailError;
-    }
+    const exhaustedRetries = currentAttempt >= totalAttempts;
 
     try {
       await db
         .update(jobs)
         .set({
-          status: "completed",
+          status: exhaustedRetries ? "failed" : "queued",
           attempts: currentAttempt,
-          resultMessageId: info.messageId,
-          completedAt: new Date(),
-          error: null,
+          error: message,
           updatedAt: new Date(),
         })
         .where(eq(jobs.id, id));
-
-      console.log(`Job ${id} completed`);
-      console.log(`Message ID: ${info.messageId}`);
-
-      return { messageId: info.messageId };
-    } catch (dbError) {
+    } catch (databaseError) {
       console.error(
-        `CRITICAL: Email for job ${id} was delivered successfully (Message ID: ${info.messageId}), but updating PostgreSQL state failed:`,
-        dbError,
+        `Could not update PostgreSQL state for job ${id}`,
+        databaseError,
       );
-      return { messageId: info.messageId };
     }
+
+    console.error(
+      `Job ${id} failed on attempt ${currentAttempt}/${totalAttempts}: ${message}`,
+    );
+
+    throw mailError;
+  }
+
+  try {
+    await db
+      .update(jobs)
+      .set({
+        status: "completed",
+        attempts: currentAttempt,
+        resultMessageId: info.messageId,
+        completedAt: new Date(),
+        error: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(jobs.id, id));
+
+    console.log(`Job ${id} completed`);
+    console.log(`Message ID: ${info.messageId}`);
+
+    return { messageId: info.messageId };
+  } catch (dbError) {
+    console.error(
+      `CRITICAL: Email for job ${id} was delivered successfully (Message ID: ${info.messageId}), but updating PostgreSQL state failed:`,
+      dbError,
+    );
+    return { messageId: info.messageId };
+  }
 }
 
-export const worker = new Worker(
-  "email",
-  processEmailJob,
-  {
-    connection: createRedisConnection(),
-    concurrency: 1,
-  },
-);
+export const worker = new Worker("email", processEmailJob, {
+  connection: createRedisConnection(),
+  concurrency: 1,
+});
 
 worker.on("completed", (job) => {
   console.log(`BullMQ job ${job.id} completed`);
