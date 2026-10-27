@@ -8,12 +8,12 @@ import { emailQueue } from "@repo/queue";
 import { db, jobs } from "@repo/database";
 import { eq, count } from "drizzle-orm";
 import {
-  z,
   emailJobSchema,
   jobIdParamSchema,
   idempotencyKeySchema,
   computePayloadHash,
 } from "@repo/contracts";
+import errHandlingMiddleware from "./middleware/error_handling.js";
 
 const app: Express = express();
 
@@ -132,7 +132,7 @@ app.post("/jobs", async (req: Request, res: Response, next: NextFunction) => {
       payloadHash = computePayloadHash(email);
     }
 
-    // 1. If an idempotency key was supplied, handle idempotent creation/deduplication
+    // If an idempotency key was supplied, handle creation/deduplication
     if (idempotencyKey && payloadHash) {
       const [insertedJob] = await db
         .insert(jobs)
@@ -176,7 +176,7 @@ app.post("/jobs", async (req: Request, res: Response, next: NextFunction) => {
         });
       }
 
-      // New row created: enqueue to BullMQ using the PostgreSQL UUID
+      // enqueue to BullMQ using the PostgreSQL UUID
       try {
         await emailQueue.add(
           "send-email",
@@ -215,7 +215,7 @@ app.post("/jobs", async (req: Request, res: Response, next: NextFunction) => {
       });
     }
 
-    // 2. Request without idempotency key: create job without deduplication
+    // Request without idempotency key: create job without deduplication
     const [createdJob] = await db
       .insert(jobs)
       .values({
@@ -266,40 +266,7 @@ app.post("/jobs", async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-// Centralized error-handling middleware
-app.use(
-  (
-    err: unknown,
-    _req: Request,
-    res: Response,
-    _next: NextFunction,
-  ) => {
-    console.error("Unhandled API error:", err);
-
-    if (err instanceof z.ZodError) {
-      return res.status(400).json({
-        error: "Validation error",
-        message: err.issues.map((i) => i.message).join(", "),
-        details: err.issues,
-      });
-    }
-
-    if (
-      err instanceof SyntaxError &&
-      "status" in err &&
-      (err as { status: number }).status === 400
-    ) {
-      return res.status(400).json({
-        error: "Invalid JSON",
-        message: "Malformed JSON in request body",
-      });
-    }
-
-    return res.status(500).json({
-      error: "Internal Server Error",
-      message: "An unexpected error occurred while processing the request",
-    });
-  },
-);
+// Error Handling
+app.use(errHandlingMiddleware);
 
 export default app;
